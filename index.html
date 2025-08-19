@@ -452,7 +452,7 @@
                       switch (error.code) {
                           case 'auth/invalid-email':
                           case 'auth/wrong-password':
-                          case 'auth/user-not-found':
+                          case 'auth/invalid-credential': // Agregada la nueva condición para errores.
                               errorMessage = 'Correo electrónico o contraseña inválidos.';
                               break;
                           default:
@@ -505,7 +505,7 @@
     </div>
 
     <!-- Tarjeta de Iniciar Sesión -->
-    <div id="login-container" class="bg-white bg-opacity-90 backdrop-blur-sm rounded-lg p-8 shadow-inner border border-gray-200 max-w-sm w-full">
+    <div id="login-container" class="bg-white bg-opacity-70 backdrop-blur-md rounded-lg p-8 shadow-inner border border-gray-200 max-w-sm w-full">
         <h2 class="text-3xl font-bold text-gray-800 mb-4 text-center">Iniciar Sesión</h2>
         <form id="login-form" class="space-y-6">
             <input type="email" id="login-email" placeholder="Correo electrónico" required
@@ -524,7 +524,7 @@
     </div>
 
     <!-- Tarjeta de Crear Cuenta -->
-    <div id="signup-container" class="bg-white bg-opacity-90 backdrop-blur-sm rounded-lg p-8 shadow-inner border border-gray-200 max-w-sm w-full hidden">
+    <div id="signup-container" class="bg-white bg-opacity-70 backdrop-blur-md rounded-lg p-8 shadow-inner border border-gray-200 max-w-sm w-full hidden">
         <h2 class="text-3xl font-bold text-gray-800 mb-4 text-center">Crear Cuenta</h2>
         <p class="text-gray-600 text-center mb-6">Es rápido y fácil.</p>
         <form id="signup-form" class="space-y-6">
@@ -559,7 +559,7 @@
     <!-- File Manager Container (Initially hidden) -->
     <div id="file-manager-container" class="hidden w-full max-w-4xl">
         <p id="user-id-display" class="text-xs text-gray-400 text-center mb-4 truncate"></p>
-        <div class="bg-white bg-opacity-90 backdrop-blur-sm rounded-xl shadow-2xl p-8 w-full border border-gray-200">
+        <div class="bg-white bg-opacity-70 backdrop-blur-md rounded-xl shadow-2xl p-8 w-full border border-gray-200">
             <div class="bg-indigo-50 bg-opacity-70 border border-indigo-200 rounded-lg p-6 mb-6">
                 <h2 class="text-2xl font-semibold text-gray-700 mb-4 text-center">Subir Nuevo Documento</h2>
                 <form id="upload-form" class="flex flex-col items-center space-y-4">
