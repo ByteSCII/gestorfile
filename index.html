@@ -1,0 +1,573 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ByteFile Gestore</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Firebase SDK y Script Principal -->
+    <script type="module">
+        // Importa las funciones básicas de Firebase y Auth.
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        // Importa las funciones de autenticación necesarias. Se ha eliminado la autenticación de Google.
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, sendEmailVerification } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        // Importa las funciones de Firestore.
+        import { getFirestore, collection, addDoc, onSnapshot, query, serverTimestamp, doc, setDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Configuración de Firebase y Cloudinary
+        const firebaseConfig = {
+            apiKey: "AIzaSyD9o7s3EvjR6cWVoqV6XNeaHWrhu0JJ_AQ",
+            authDomain: "bytefile-gestore.firebaseapp.com",
+            projectId: "bytefile-gestore",
+            storageBucket: "bytefile-gestore.firebasestorage.app",
+            messagingSenderId: "909119868260",
+            appId: "1:909119868260:web:6b4aa641a7b04ea043be71"
+        };
+        const cloudinaryConfig = {
+            cloudName: "dz8hasta0",
+            uploadPreset: "ByteFile Gestore"
+        };
+        
+        // Variables globales y inicialización de Firebase
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const firebaseApp = initializeApp(firebaseConfig);
+        const db = getFirestore(firebaseApp);
+        const auth = getAuth(firebaseApp);
+
+        let userId = null;
+        let initialAuthCheckDone = false;
+        
+        // --- Funciones del Gestor de Archivos ---
+
+        // Función para mostrar mensajes del sistema
+        function showMessage(text, type = 'info') {
+            const messageContainer = document.getElementById('message-container');
+            const messageBox = document.getElementById('message-box');
+            if (messageContainer && messageBox) {
+                messageContainer.classList.remove('hidden');
+                messageBox.textContent = text;
+                if (type === 'success') {
+                    messageBox.className = 'p-4 rounded-lg text-sm text-center font-medium bg-green-100 text-green-700';
+                } else if (type === 'error') {
+                    messageBox.className = 'p-4 rounded-lg text-sm text-center font-medium bg-red-100 text-red-700';
+                } else {
+                    messageBox.className = 'p-4 rounded-lg text-sm text-center font-medium bg-blue-100 text-blue-700';
+                }
+                setTimeout(() => {
+                    messageContainer.classList.add('hidden');
+                }, 5000);
+            }
+        }
+        
+        // Función para renderizar la lista de archivos
+        function renderFiles(docs) {
+            const fileListContainer = document.getElementById('file-list');
+            if (!fileListContainer) return;
+
+            if (docs.length === 0) {
+                fileListContainer.innerHTML = '<p class="text-center text-gray-500 mt-8">Aún no has subido ningún documento.</p>';
+                return;
+            }
+
+            fileListContainer.innerHTML = '';
+            docs.forEach(doc => {
+                const data = doc.data();
+                const createdAt = data.createdAt ? new Date(data.createdAt.seconds * 1000).toLocaleDateString() : 'Fecha desconocida';
+                const fileSizeKB = (data.fileSize / 1024).toFixed(2);
+
+                const fileCard = document.createElement('div');
+                fileCard.className = 'file-list-item bg-gray-50 rounded-lg shadow-sm p-4 border border-gray-200 flex flex-col sm:flex-row justify-between items-start sm:items-center space-y-2 sm:space-y-0';
+                fileCard.innerHTML = `
+                    <div class="flex-1 min-w-0">
+                        <h3 class="text-lg font-medium text-indigo-600 truncate">${data.fileName}</h3>
+                        <p class="text-gray-500 text-sm truncate">
+                            <strong>Categoría:</strong> ${data.category} | 
+                            <strong>Tamaño:</strong> ${fileSizeKB} KB |
+                            <strong>Subido:</strong> ${createdAt}
+                        </p>
+                    </div>
+                    <div class="flex items-center space-x-2">
+                        <a href="${data.fileUrl}" target="_blank" class="px-3 py-1 bg-indigo-500 text-white text-sm font-semibold rounded-full hover:bg-indigo-600 transition-colors duration-200">
+                            Ver
+                        </a>
+                        <button class="delete-btn px-3 py-1 bg-red-500 text-white text-sm font-semibold rounded-full hover:bg-red-600 transition-colors duration-200" data-id="${doc.id}">
+                            Eliminar
+                        </button>
+                    </div>
+                `;
+                fileListContainer.appendChild(fileCard);
+            });
+        }
+        
+        // Escucha los cambios en tiempo real en la base de datos de Firestore
+        function setupRealtimeListener() {
+            if (!userId) {
+                console.error("No se puede iniciar el listener de Firestore: el ID de usuario no está disponible.");
+                return;
+            }
+
+            const documentsCollection = collection(db, `artifacts/${appId}/users/${userId}/documents`);
+            const q = query(documentsCollection);
+            onSnapshot(q, (snapshot) => {
+                console.log("Listener de Firestore activado. Documentos recibidos:", snapshot.size);
+                const docs = [];
+                snapshot.forEach(d => {
+                    docs.push(d);
+                });
+                
+                // Ordena los documentos del lado del cliente
+                const sortBy = document.getElementById('sort-by').value;
+                const sortDirection = document.getElementById('sort-direction-btn').dataset.direction;
+
+                docs.sort((a, b) => {
+                    const aValue = a.data()[sortBy];
+                    const bValue = b.data()[sortBy];
+
+                    if (typeof aValue === 'string') {
+                        const result = aValue.localeCompare(bValue);
+                        return sortDirection === 'asc' ? result : -result;
+                    } else if (typeof aValue === 'number') {
+                        const result = aValue - bValue;
+                        return sortDirection === 'asc' ? result : -result;
+                    } else if (aValue && aValue.seconds && bValue && bValue.seconds) {
+                            const result = aValue.seconds - bValue.seconds;
+                            return sortDirection === 'asc' ? result : -result;
+                    }
+                    return 0;
+                });
+                
+                renderFiles(docs);
+            }, (error) => {
+                console.error("Error al escuchar los cambios en Firestore:", error);
+                showMessage("Error al cargar los documentos. Por favor, recarga la página.", 'error');
+            });
+        }
+        
+        // Listener para el estado de autenticación del usuario
+        onAuthStateChanged(auth, (user) => {
+            const loginContainer = document.getElementById('login-container');
+            const signupContainer = document.getElementById('signup-container');
+            const fileManagerContainer = document.getElementById('file-manager-container');
+            const userIdDisplay = document.getElementById('user-id-display');
+
+            if (user) {
+                // Si el usuario está autenticado, muestra la interfaz de gestión de archivos.
+                // Verifica si el correo electrónico ha sido verificado antes de permitir el acceso.
+                if (user.emailVerified) {
+                    userId = user.uid;
+                    if (loginContainer) loginContainer.classList.add('hidden');
+                    if (signupContainer) signupContainer.classList.add('hidden');
+                    if (fileManagerContainer) fileManagerContainer.classList.remove('hidden');
+                    if (userIdDisplay) userIdDisplay.textContent = `ID de Usuario: ${userId}`;
+                    if (!initialAuthCheckDone) {
+                        setupRealtimeListener();
+                        initialAuthCheckDone = true;
+                    }
+                } else {
+                    // Si el correo no está verificado, vuelve a la pantalla de inicio de sesión
+                    if (loginContainer) loginContainer.classList.remove('hidden');
+                    if (signupContainer) signupContainer.classList.add('hidden');
+                    if (fileManagerContainer) fileManagerContainer.classList.add('hidden');
+                    if (userIdDisplay) userIdDisplay.textContent = '';
+                    showMessage('Tu correo electrónico no ha sido verificado. Por favor, revisa tu bandeja de entrada y haz clic en el enlace de verificación.', 'error');
+                }
+            } else {
+                // Si el usuario no está autenticado, muestra la pantalla de inicio de sesión.
+                if (loginContainer) loginContainer.classList.remove('hidden');
+                if (signupContainer) signupContainer.classList.add('hidden');
+                if (fileManagerContainer) fileManagerContainer.classList.add('hidden');
+                if (userIdDisplay) userIdDisplay.textContent = '';
+            }
+        });
+
+        document.addEventListener('DOMContentLoaded', () => {
+            // Referencias a los elementos del DOM para autenticación
+            const loginContainer = document.getElementById('login-container');
+            const signupContainer = document.getElementById('signup-container');
+            const showSignupBtn = document.getElementById('show-signup-btn');
+            const showLoginBtn = document.getElementById('show-login-btn');
+            const loginForm = document.getElementById('login-form');
+            const signupForm = document.getElementById('signup-form');
+            const logoutBtn = document.getElementById('logout-btn');
+            
+            // Referencias a los elementos del DOM para el gestor de archivos
+            const uploadForm = document.getElementById('upload-form');
+            const fileInput = document.getElementById('file-input');
+            const categoryInput = document.getElementById('category-input');
+            const fileList = document.getElementById('file-list');
+            const sortBySelect = document.getElementById('sort-by');
+            const sortDirectionBtn = document.getElementById('sort-direction-btn');
+            const sortIconAsc = document.getElementById('sort-icon-asc');
+            const sortIconDesc = document.getElementById('sort-icon-desc');
+            
+            // Referencias para los nuevos campos del registro
+            const signupDob = document.getElementById('signup-dob');
+            const signupPhone = document.getElementById('signup-phone');
+            const signupRecoveryEmail = document.getElementById('signup-recovery-email');
+
+            // Referencias para la barra de progreso
+            const progressBarContainer = document.getElementById('progress-bar-container');
+            const progressBar = document.getElementById('progress-bar');
+            const progressText = document.getElementById('progress-text');
+
+            let sortDirection = 'desc'; // 'asc' or 'desc'
+            if (sortDirectionBtn) {
+              sortDirectionBtn.dataset.direction = sortDirection;
+            }
+
+            // Subir archivo a Cloudinary
+            async function uploadFileToCloudinary(file) {
+                return new Promise((resolve, reject) => {
+                    const xhr = new XMLHttpRequest();
+                    const formData = new FormData();
+                    formData.append('file', file);
+                    formData.append('upload_preset', cloudinaryConfig.uploadPreset);
+
+                    xhr.upload.addEventListener('progress', (e) => {
+                        if (e.lengthComputable) {
+                            const percent = Math.round((e.loaded / e.total) * 100);
+                            if (progressBar) progressBar.style.width = `${percent}%`;
+                            if (progressText) progressText.textContent = `${percent}%`;
+                            if (progressBarContainer) progressBarContainer.classList.remove('hidden');
+                        }
+                    });
+
+                    xhr.onreadystatechange = () => {
+                        if (xhr.readyState === XMLHttpRequest.DONE) {
+                            if (progressBarContainer) progressBarContainer.classList.add('hidden');
+                            if (progressBar) progressBar.style.width = '0%';
+                            if (progressText) progressText.textContent = '0%';
+                            
+                            if (xhr.status === 200) {
+                                resolve(JSON.parse(xhr.responseText));
+                            } else {
+                                try {
+                                    const errorData = JSON.parse(xhr.responseText);
+                                    reject(new Error(errorData.error.message || "Error al subir a Cloudinary"));
+                                } catch (e) {
+                                    reject(new Error("Error desconocido al subir a Cloudinary"));
+                                }
+                            }
+                        }
+                    };
+
+                    xhr.open('POST', `https://api.cloudinary.com/v1_1/${cloudinaryConfig.cloudName}/upload`);
+                    xhr.send(formData);
+                });
+            }
+
+            // Añadir documento a Firestore
+            async function addDocumentToFirestore(fileInfo) {
+                try {
+                    const docRef = await addDoc(collection(db, `artifacts/${appId}/users/${userId}/documents`), fileInfo);
+                    console.log("Documento escrito con ID: ", docRef.id);
+                    showMessage('Archivo subido y guardado exitosamente en la base de datos.', 'success');
+                } catch (e) {
+                    console.error("Error al añadir documento: ", e);
+                    showMessage("Error al guardar la información del archivo en la base de datos.", 'error');
+                }
+            }
+
+            // Manejar el envío del formulario de subida
+            if (uploadForm) {
+              uploadForm.addEventListener('submit', async (e) => {
+                  e.preventDefault();
+                  const file = fileInput.files[0];
+                  if (!file) {
+                      showMessage('Por favor, selecciona un archivo.', 'error');
+                      return;
+                  }
+                  
+                  showMessage('Subiendo archivo, por favor espera...', 'info');
+
+                  try {
+                      const cloudinaryData = await uploadFileToCloudinary(file);
+                      if (cloudinaryData) {
+                          const fileInfo = {
+                              fileName: file.name,
+                              fileSize: file.size,
+                              category: categoryInput.value || 'Sin categoría',
+                              fileUrl: cloudinaryData.secure_url,
+                              fileFormat: cloudinaryData.format || 'desconocido',
+                              publicId: cloudinaryData.public_id,
+                              createdAt: serverTimestamp()
+                          };
+                          await addDocumentToFirestore(fileInfo);
+                          fileInput.value = '';
+                          categoryInput.value = '';
+                      }
+                  } catch (error) {
+                      console.error('Error subiendo a Cloudinary:', error);
+                      showMessage(`Error al subir el archivo: ${error.message}`, 'error');
+                  }
+              });
+            }
+
+            // Manejar la eliminación de archivos
+            if (fileList) {
+              fileList.addEventListener('click', async (e) => {
+                  if (e.target.classList.contains('delete-btn')) {
+                      const docId = e.target.dataset.id;
+                      try {
+                          await deleteDoc(doc(db, `artifacts/${appId}/users/${userId}/documents`, docId));
+                          showMessage('Documento eliminado exitosamente.', 'success');
+                      } catch (error) {
+                          console.error('Error al eliminar documento:', error);
+                          showMessage('Error al eliminar el documento.', 'error');
+                      }
+                  }
+              });
+            }
+
+            // Cambiar la dirección de ordenación
+            if (sortDirectionBtn) {
+              sortDirectionBtn.addEventListener('click', () => {
+                  const sortDirection = sortDirectionBtn.dataset.direction;
+                  const newDirection = sortDirection === 'asc' ? 'desc' : 'asc';
+                  sortDirectionBtn.dataset.direction = newDirection;
+                  if (sortIconAsc) sortIconAsc.classList.toggle('hidden', newDirection === 'desc');
+                  if (sortIconDesc) sortIconDesc.classList.toggle('hidden', newDirection === 'asc');
+                  setupRealtimeListener();
+              });
+            }
+
+            // Cambiar el campo de ordenación
+            if (sortBySelect) {
+              sortBySelect.addEventListener('change', () => {
+                  setupRealtimeListener();
+              });
+            }
+
+            // --- Funciones de Autenticación ---
+
+            // Cambiar entre formularios de inicio de sesión y registro
+            if (showSignupBtn) {
+                showSignupBtn.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    if (loginContainer) loginContainer.classList.add('hidden');
+                    if (signupContainer) signupContainer.classList.remove('hidden');
+                });
+            }
+            if (showLoginBtn) {
+                showLoginBtn.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    if (signupContainer) signupContainer.classList.add('hidden');
+                    if (loginContainer) loginContainer.classList.remove('hidden');
+                });
+            }
+
+            // Manejar el formulario de registro
+            if (signupForm) {
+              signupForm.addEventListener('submit', async (e) => {
+                  e.preventDefault();
+                  const email = document.getElementById('signup-email').value;
+                  const password = document.getElementById('signup-password').value;
+                  const dateOfBirth = signupDob ? signupDob.value : null;
+                  const phoneNumber = signupPhone ? signupPhone.value : null;
+                  const recoveryEmail = signupRecoveryEmail ? signupRecoveryEmail.value : null;
+
+                  try {
+                      const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+                      const user = userCredential.user;
+
+                      // Envía el correo de verificación
+                      await sendEmailVerification(user);
+
+                      // Guarda los datos del perfil en Firestore
+                      await setDoc(doc(db, `artifacts/${appId}/users/${user.uid}/profile/main_profile`), {
+                          dateOfBirth: dateOfBirth,
+                          phoneNumber: phoneNumber,
+                          recoveryEmail: recoveryEmail,
+                          createdAt: serverTimestamp()
+                      });
+
+                      showMessage('¡Registro exitoso! Se ha enviado un correo de verificación. Por favor, revisa tu bandeja de entrada y haz clic en el enlace.', 'success');
+                      
+                      signupForm.reset();
+                      await signOut(auth);
+
+                  } catch (error) {
+                      console.error("Error en el registro:", error);
+                      if (error.code === 'auth/email-already-in-use') {
+                          showMessage('El correo electrónico ya está en uso. Por favor, inicia sesión o utiliza uno diferente.', 'error');
+                      } else {
+                          showMessage(`Error al registrar: ${error.message}`, 'error');
+                      }
+                  }
+              });
+            }
+
+            // Manejar el formulario de inicio de sesión
+            if (loginForm) {
+              loginForm.addEventListener('submit', async (e) => {
+                  e.preventDefault();
+                  const email = document.getElementById('login-email').value;
+                  const password = document.getElementById('login-password').value;
+                  try {
+                      const userCredential = await signInWithEmailAndPassword(auth, email, password);
+                      const user = userCredential.user;
+
+                      if (!user.emailVerified) {
+                          await signOut(auth);
+                          showMessage('Tu correo electrónico no ha sido verificado. Por favor, revisa tu bandeja de entrada y haz clic en el enlace.', 'error');
+                      } else {
+                          showMessage('¡Inicio de sesión exitoso!', 'success');
+                          loginForm.reset();
+                      }
+                  } catch (error) {
+                      console.error("Error en el inicio de sesión:", error);
+                      showMessage(`Error al iniciar sesión: ${error.message}`, 'error');
+                  }
+              });
+            }
+
+            // Manejar el cierre de sesión
+            if (logoutBtn) {
+              logoutBtn.addEventListener('click', async () => {
+                  try {
+                      await signOut(auth);
+                      showMessage('Sesión cerrada correctamente.', 'info');
+                  } catch (error) {
+                      console.error("Error al cerrar sesión:", error);
+                      showMessage("Error al cerrar sesión.", 'error');
+                  }
+              });
+            }
+        });
+    </script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f3f4f6;
+            background-image: url('./images/fondo.webp'); /* Nueva imagen de fondo */
+            background-size: cover;
+            background-position: center;
+        }
+        .file-list-item {
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        .file-list-item:hover {
+            transform: translateY(-2px);
+            box-shadow: 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+        }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col items-center justify-center p-4">
+    <!-- Contenedor para el título y mensajes -->
+    <div class="flex flex-col items-center mb-8">
+        <!-- Reemplazando el texto del título con una imagen -->
+        <img src="./images/logo.webp" alt="Logo de ByteFile Gestore" class="w-48 mb-4">
+        <p class="text-gray-500 text-center">Gestor de Documentos Digitales</p>
+        <div id="message-container" class="mt-6 mb-6 hidden max-w-sm w-full">
+            <div id="message-box" class="p-4 rounded-lg text-sm text-center font-medium"></div>
+        </div>
+    </div>
+
+    <!-- Tarjeta de Iniciar Sesión -->
+    <div id="login-container" class="bg-white bg-opacity-90 backdrop-blur-sm rounded-lg p-8 shadow-inner border border-indigo-200 max-w-sm w-full">
+        <h2 class="text-3xl font-bold text-gray-800 mb-4 text-center">Iniciar Sesión</h2>
+        <form id="login-form" class="space-y-6">
+            <input type="email" id="login-email" placeholder="Correo electrónico" required
+                class="w-full p-3 border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all duration-200">
+            <input type="password" id="login-password" placeholder="Contraseña" required
+                class="w-full p-3 border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all duration-200">
+            <button type="submit"
+                class="w-full px-6 py-3 bg-indigo-600 text-white font-bold rounded-full shadow-lg hover:bg-indigo-700 transition-colors duration-300">
+                Ingresar
+            </button>
+        </form>
+        <div class="text-center mt-4">
+            <button id="show-signup-btn" class="text-indigo-600 font-semibold text-sm hover:underline focus:outline-none">¿No tienes una cuenta? <span class="font-bold">Regístrate</span></button>
+        </div>
+    </div>
+
+    <!-- Tarjeta de Crear Cuenta -->
+    <div id="signup-container" class="bg-white bg-opacity-90 backdrop-blur-sm rounded-lg p-8 shadow-inner border border-purple-200 max-w-sm w-full hidden">
+        <h2 class="text-3xl font-bold text-gray-800 mb-4 text-center">Crear Cuenta</h2>
+        <p class="text-gray-600 text-center mb-6">Es rápido y fácil.</p>
+        <form id="signup-form" class="space-y-6">
+            <div class="flex space-x-4">
+                <input type="text" id="signup-name" placeholder="Nombre" required
+                    class="w-1/2 p-3 border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all duration-200">
+                <input type="text" id="signup-lastname" placeholder="Apellido" required
+                    class="w-1/2 p-3 border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all duration-200">
+            </div>
+            <input type="email" id="signup-email" placeholder="Correo electrónico" required
+                class="w-full p-3 border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all duration-200">
+            <input type="password" id="signup-password" placeholder="Contraseña nueva" required
+                class="w-full p-3 border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all duration-200">
+            <!-- New fields for registration -->
+            <input type="date" id="signup-dob" placeholder="Fecha de Nacimiento"
+                class="w-full p-3 border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all duration-200">
+            <input type="tel" id="signup-phone" placeholder="Número de Teléfono"
+                class="w-full p-3 border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all duration-200">
+            <input type="email" id="signup-recovery-email" placeholder="Correo de Recuperación (opcional)"
+                class="w-full p-3 border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all duration-200">
+            <button type="submit"
+                class="w-full px-6 py-3 bg-purple-600 text-white font-bold rounded-full shadow-lg hover:bg-purple-700 transition-colors duration-300">
+                Registrarse
+            </button>
+        </form>
+        <div class="text-center mt-4">
+            <button id="show-login-btn" class="text-purple-600 font-semibold text-sm hover:underline focus:outline-none">¿Ya tienes una cuenta? <span class="font-bold">Inicia Sesión</span></button>
+        </div>
+    </div>
+
+    <!-- File Manager Container (Initially hidden) -->
+    <div id="file-manager-container" class="hidden w-full max-w-4xl">
+        <p id="user-id-display" class="text-xs text-gray-400 text-center mb-4 truncate"></p>
+        <div class="bg-white bg-opacity-90 backdrop-blur-sm rounded-xl shadow-2xl p-8 w-full border border-gray-200">
+            <div class="bg-indigo-50 bg-opacity-70 border border-indigo-200 rounded-lg p-6 mb-6">
+                <h2 class="text-2xl font-semibold text-gray-700 mb-4 text-center">Subir Nuevo Documento</h2>
+                <form id="upload-form" class="flex flex-col items-center space-y-4">
+                    <input type="file" id="file-input" required
+                        class="block w-full text-sm text-gray-900 border border-gray-300 rounded-lg cursor-pointer bg-gray-50 focus:outline-none">
+                    <div class="w-full flex items-center space-x-4">
+                        <label for="category-input" class="text-gray-700">Categoría:</label>
+                        <input type="text" id="category-input" placeholder="e.j. 'Proyectos', 'Facturas', 'Personal'"
+                            class="flex-1 p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
+                    </div>
+                    <button type="submit"
+                        class="w-full sm:w-auto px-6 py-3 bg-indigo-600 text-white font-bold rounded-full shadow-lg hover:bg-indigo-700 focus:outline-none focus:ring-4 focus:ring-indigo-500 focus:ring-opacity-50 transition-all duration-300">
+                        Subir Archivo
+                    </button>
+                </form>
+                 <!-- Progress bar for upload -->
+                <div id="progress-bar-container" class="mt-4 w-full bg-gray-200 rounded-full h-2.5 dark:bg-gray-700 hidden">
+                    <div id="progress-bar" class="bg-indigo-600 h-2.5 rounded-full" style="width: 0%"></div>
+                </div>
+                <div id="progress-text" class="text-sm font-medium text-gray-500 text-center mt-2"></div>
+            </div>
+
+            <div class="flex flex-col sm:flex-row justify-between items-center mb-6 space-y-4 sm:space-y-0">
+                <h2 class="text-2xl font-semibold text-gray-700">Tus Documentos</h2>
+                <div class="flex items-center space-x-4">
+                    <label for="sort-by" class="text-gray-700">Ordenar por:</label>
+                    <select id="sort-by" class="p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-indigo-500">
+                        <option value="createdAt">Fecha de Subida</option>
+                        <option value="fileName">Nombre</option>
+                        <option value="fileSize">Tamaño</option>
+                    </select>
+                    <button id="sort-direction-btn" class="p-2 rounded-md bg-gray-200 text-gray-700 hover:bg-gray-300 transition-colors">
+                        <svg id="sort-icon-asc" xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                            <path fill-rule="evenodd" d="M10 18a.75.75 0 01-.75-.75V3.81L7.56 5.3a.75.75 0 01-1.06-1.06l2.5-2.5a.75.75 0 011.06 0l2.5 2.5a.75.75 0 01-1.06 1.06L10.75 3.81v13.44a.75.75 0 01-.75.75z" clip-rule="evenodd" />
+                        </svg>
+                        <svg id="sort-icon-desc" xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 hidden" viewBox="0 0 20 20" fill="currentColor">
+                            <path fill-rule="evenodd" d="M10 2a.75.75 0 01.75.75v13.44l2.19-2.19a.75.75 0 111.06 1.06l-2.5 2.5a.75.75 0 01-1.06 0l-2.5-2.5a.75.75 0 111.06-1.06l2.19 2.19V2.75A.75.75 0 0110 2z" clip-rule="evenodd" />
+                        </svg>
+                    </button>
+                    <button id="logout-btn" class="px-4 py-2 bg-red-500 text-white font-bold rounded-full shadow-lg hover:bg-red-600 transition-colors duration-300">
+                        Cerrar Sesión
+                    </button>
+                </div>
+            </div>
+
+            <!-- File list -->
+            <div id="file-list" class="space-y-4">
+                <p class="text-center text-gray-500 mt-8">Cargando documentos...</p>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
