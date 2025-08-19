@@ -60,6 +60,24 @@
                 }, 5000);
             }
         }
+
+        // Función para mostrar errores específicos de formularios
+        function displayFormError(formId, message) {
+            const errorContainer = document.getElementById(formId + '-error-message');
+            if (errorContainer) {
+                errorContainer.textContent = message;
+                errorContainer.classList.remove('hidden');
+            }
+        }
+
+        // Función para limpiar los errores de formularios
+        function clearFormErrors(formId) {
+            const errorContainer = document.getElementById(formId + '-error-message');
+            if (errorContainer) {
+                errorContainer.textContent = '';
+                errorContainer.classList.add('hidden');
+            }
+        }
         
         // Función para renderizar la lista de archivos
         function renderFiles(docs) {
@@ -348,6 +366,7 @@
                     e.preventDefault();
                     if (loginContainer) loginContainer.classList.add('hidden');
                     if (signupContainer) signupContainer.classList.remove('hidden');
+                    clearFormErrors('login');
                 });
             }
             if (showLoginBtn) {
@@ -355,6 +374,7 @@
                     e.preventDefault();
                     if (signupContainer) signupContainer.classList.add('hidden');
                     if (loginContainer) loginContainer.classList.remove('hidden');
+                    clearFormErrors('signup');
                 });
             }
 
@@ -362,6 +382,7 @@
             if (signupForm) {
               signupForm.addEventListener('submit', async (e) => {
                   e.preventDefault();
+                  clearFormErrors('signup'); // Limpia errores previos
                   const email = document.getElementById('signup-email').value;
                   const password = document.getElementById('signup-password').value;
                   const dateOfBirth = signupDob ? signupDob.value : null;
@@ -389,12 +410,21 @@
                       await signOut(auth);
 
                   } catch (error) {
-                      console.error("Error en el registro:", error);
-                      if (error.code === 'auth/email-already-in-use') {
-                          showMessage('El correo electrónico ya está en uso. Por favor, inicia sesión o utiliza uno diferente.', 'error');
-                      } else {
-                          showMessage(`Error al registrar: ${error.message}`, 'error');
+                      let errorMessage;
+                      switch (error.code) {
+                          case 'auth/email-already-in-use':
+                              errorMessage = 'Este correo ya está registrado.';
+                              break;
+                          case 'auth/invalid-email':
+                              errorMessage = 'El formato del correo electrónico es inválido.';
+                              break;
+                          case 'auth/weak-password':
+                              errorMessage = 'La contraseña debe tener al menos 6 caracteres.';
+                              break;
+                          default:
+                              errorMessage = `Error al registrar: ${error.message}`;
                       }
+                      displayFormError('signup', errorMessage);
                   }
               });
             }
@@ -403,6 +433,7 @@
             if (loginForm) {
               loginForm.addEventListener('submit', async (e) => {
                   e.preventDefault();
+                  clearFormErrors('login'); // Limpia errores previos
                   const email = document.getElementById('login-email').value;
                   const password = document.getElementById('login-password').value;
                   try {
@@ -417,8 +448,17 @@
                           loginForm.reset();
                       }
                   } catch (error) {
-                      console.error("Error en el inicio de sesión:", error);
-                      showMessage(`Error al iniciar sesión: ${error.message}`, 'error');
+                      let errorMessage;
+                      switch (error.code) {
+                          case 'auth/invalid-email':
+                          case 'auth/wrong-password':
+                          case 'auth/user-not-found':
+                              errorMessage = 'Correo electrónico o contraseña inválidos.';
+                              break;
+                          default:
+                              errorMessage = `Error al iniciar sesión: ${error.message}`;
+                      }
+                      displayFormError('login', errorMessage);
                   }
               });
             }
@@ -465,13 +505,14 @@
     </div>
 
     <!-- Tarjeta de Iniciar Sesión -->
-    <div id="login-container" class="bg-white bg-opacity-90 backdrop-blur-sm rounded-lg p-8 shadow-inner border border-indigo-200 max-w-sm w-full">
+    <div id="login-container" class="bg-white bg-opacity-90 backdrop-blur-sm rounded-lg p-8 shadow-inner border border-gray-200 max-w-sm w-full">
         <h2 class="text-3xl font-bold text-gray-800 mb-4 text-center">Iniciar Sesión</h2>
         <form id="login-form" class="space-y-6">
             <input type="email" id="login-email" placeholder="Correo electrónico" required
                 class="w-full p-3 border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all duration-200">
             <input type="password" id="login-password" placeholder="Contraseña" required
                 class="w-full p-3 border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all duration-200">
+            <div id="login-error-message" class="text-sm text-red-600 text-center hidden"></div>
             <button type="submit"
                 class="w-full px-6 py-3 bg-indigo-600 text-white font-bold rounded-full shadow-lg hover:bg-indigo-700 transition-colors duration-300">
                 Ingresar
@@ -483,7 +524,7 @@
     </div>
 
     <!-- Tarjeta de Crear Cuenta -->
-    <div id="signup-container" class="bg-white bg-opacity-90 backdrop-blur-sm rounded-lg p-8 shadow-inner border border-purple-200 max-w-sm w-full hidden">
+    <div id="signup-container" class="bg-white bg-opacity-90 backdrop-blur-sm rounded-lg p-8 shadow-inner border border-gray-200 max-w-sm w-full hidden">
         <h2 class="text-3xl font-bold text-gray-800 mb-4 text-center">Crear Cuenta</h2>
         <p class="text-gray-600 text-center mb-6">Es rápido y fácil.</p>
         <form id="signup-form" class="space-y-6">
@@ -504,6 +545,7 @@
                 class="w-full p-3 border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all duration-200">
             <input type="email" id="signup-recovery-email" placeholder="Correo de Recuperación (opcional)"
                 class="w-full p-3 border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all duration-200">
+            <div id="signup-error-message" class="text-sm text-red-600 text-center hidden"></div>
             <button type="submit"
                 class="w-full px-6 py-3 bg-purple-600 text-white font-bold rounded-full shadow-lg hover:bg-purple-700 transition-colors duration-300">
                 Registrarse
